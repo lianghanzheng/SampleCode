@@ -15,7 +15,6 @@ set(LIBS
   MLIRFuncToLLVM
   MLIROpenMPToLLVMIRTranslation
   MLIRArithToLLVM
-  MLIRConvertToLLVMPass
   MLIRControlFlowToLLVM
   MLIRMemRefToLLVM
   MLIROpenMPToLLVM
