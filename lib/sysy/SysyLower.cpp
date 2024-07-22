@@ -7,6 +7,8 @@
 #include "mlir/IR/Types.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/raw_ostream.h" // for llvm::errs.
+#include <mlir/IR/BuiltinTypes.h>
+#include <mlir/Support/LogicalResult.h>
 
 #include "sysy/SysyLower.h"
 #include "sysy/SysyDialect.h"
@@ -93,6 +95,149 @@ struct ConvertMatmul : public OpConversionPattern<MatmulOp> {
   }
 }; // struct ConvertMatmul
 
+struct ConvertAdd : public OpConversionPattern<AddOp> {
+  ConvertAdd(MLIRContext *ctx)
+      : OpConversionPattern<AddOp>(ctx) {}
+
+  using OpConversionPattern::OpConversionPattern;
+
+  static LogicalResult createAddBody(
+      const SmallVector<Value, 3> &idx, 
+      const Type &elemType, 
+      ImplicitLocOpBuilder &b,
+      const Value &dst, 
+      const Value &lhs,
+      const Value &rhs) {
+    auto elemLhs = b.create<affine::AffineLoadOp>(lhs, idx);
+    auto elemRhs = b.create<affine::AffineLoadOp>(rhs, idx);
+      
+    if (elemType.isF32()) {
+      auto elemDst = b.create<arith::AddFOp>(elemLhs, elemRhs);
+      (void)b.create<affine::AffineStoreOp>(
+          elemDst, dst, idx);
+    } else if (elemType.isInteger(32)) {
+      auto elemDst = b.create<arith::AddIOp>(elemLhs, elemRhs);
+      (void)b.create<affine::AffineStoreOp>(
+          elemDst, dst, idx);
+    } else {
+      return failure();
+    }
+
+    return success();
+  }
+
+  LogicalResult matchAndRewrite(
+      AddOp op, OpAdaptor adaptor,
+      ConversionPatternRewriter &rewriter) const override {
+    const auto dst = adaptor.getDst();
+    const auto lhs = adaptor.getLhs();
+    const auto rhs = adaptor.getRhs();
+    const auto dstMemref = cast<MemRefType>(dst.getType());
+    const auto elemType = dstMemref.getElementType();
+    
+    ImplicitLocOpBuilder b(op.getLoc(), rewriter);
+
+    const auto &dims = dstMemref.getShape();
+    using affineLoadIdx = SmallVector<Value, 3>;
+    
+    if (dims.size() == 0) {
+      op.emitError("Occurs the case like memref<f32>\n");
+      return failure();
+    } else if (1<=dims.size() && dims.size()<=3) {
+      affineLoadIdx index;
+      for (const auto ub : dims) {
+        auto loop = b.create<affine::AffineForOp>(0, ub, 1);
+        b.setInsertionPointToStart(loop.getBody());
+        auto i = cast<Value>(loop.getInductionVar());
+        index.push_back(i);        
+      }
+      if (failed(createAddBody(index, elemType, b, dst, lhs, rhs))) {
+        op.emitError("The data type of `sysy.add` should be I32 or F32\n");
+        return failure();
+      }
+    } else {
+      op.emitError("The dimension of sysy tensor "
+                   "is too high with current sysy.add implementation.\n");
+      return failure();
+    }
+
+    rewriter.eraseOp(op);    
+    return success();
+  }
+}; // struct ConvertAdd
+
+struct ConvertSub : public OpConversionPattern<SubOp> {
+  ConvertSub(MLIRContext *ctx)
+      : OpConversionPattern<SubOp>(ctx) {}
+
+  using OpConversionPattern::OpConversionPattern;
+
+  static LogicalResult createSubBody(
+      const SmallVector<Value, 3> &idx, 
+      const Type &elemType, 
+      ImplicitLocOpBuilder &b,
+      const Value &dst, 
+      const Value &lhs,
+      const Value &rhs) {
+    auto elemLhs = b.create<affine::AffineLoadOp>(lhs, idx);
+    auto elemRhs = b.create<affine::AffineLoadOp>(rhs, idx);
+      
+    if (elemType.isF32()) {
+      auto elemDst = b.create<arith::SubFOp>(elemLhs, elemRhs);
+      (void)b.create<affine::AffineStoreOp>(
+          elemDst, dst, idx);
+    } else if (elemType.isInteger(32)) {
+      auto elemDst = b.create<arith::SubIOp>(elemLhs, elemRhs);
+      (void)b.create<affine::AffineStoreOp>(
+          elemDst, dst, idx);
+    } else {
+      return failure();
+    }
+
+    return success();
+  }
+
+  LogicalResult matchAndRewrite(
+      SubOp op, OpAdaptor adaptor,
+      ConversionPatternRewriter &rewriter) const override {
+    const auto dst = adaptor.getDst();
+    const auto lhs = adaptor.getLhs();
+    const auto rhs = adaptor.getRhs();
+    const auto dstMemref = cast<MemRefType>(dst.getType());
+    const auto elemType = dstMemref.getElementType();
+    
+    ImplicitLocOpBuilder b(op.getLoc(), rewriter);
+
+    const auto &dims = dstMemref.getShape();
+    using affineLoadIdx = SmallVector<Value, 3>;
+    
+    if (dims.size() == 0) {
+      op.emitError("Occurs the case like memref<f32>\n");
+      return failure();
+    } else if (1<=dims.size() && dims.size()<=3) {
+      affineLoadIdx index;
+      for (const auto ub : dims) {
+        auto loop = b.create<affine::AffineForOp>(0, ub, 1);
+        b.setInsertionPointToStart(loop.getBody());
+        auto i = cast<Value>(loop.getInductionVar());
+        index.push_back(i);        
+      }
+      if (failed(createSubBody(index, elemType, b, dst, lhs, rhs))) {
+        op.emitError("The data type of `sysy.sub` should be I32 or F32\n");
+        return failure();
+      }
+    } else {
+      op.emitError("The dimension of sysy tensor "
+                   "is too high with current sysy.sub implementation.\n");
+      return failure();
+    }
+
+    rewriter.eraseOp(op);    
+    return success();
+  }
+}; // struct ConvertSub
+
+
 struct SysyLower : impl::SysyLowerBase<SysyLower> {
   using SysyLowerBase::SysyLowerBase;
 
@@ -109,6 +254,8 @@ struct SysyLower : impl::SysyLowerBase<SysyLower> {
     RewritePatternSet patterns(context);
     SysyLowerTypeConverter typeConverter(context);
     patterns.add<ConvertMatmul>(typeConverter, context);
+    patterns.add<ConvertAdd>(typeConverter, context);
+    patterns.add<ConvertSub>(typeConverter, context);
 
     if (failed(applyPartialConversion(module, target, std::move(patterns)))) {
       signalPassFailure();
