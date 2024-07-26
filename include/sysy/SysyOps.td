@@ -1,11 +1,25 @@
 #ifndef SYSY_SYSYOPS_TD_
 #define SYSY_SYSYOPS_TD_
 
+include "mlir/IR/OpBase.td"
+include "mlir/Interfaces/SideEffectInterfaces.td"
+include "mlir/IR/BuiltinAttributes.td"
 include "SysyDialect.td"
 
+def AttrType : AnyAttrOf<[FloatElementsAttr<32>, AnyIntElementsAttr]>;
 def MemType : MemRefOf<[AnyInteger, F32]>;
 def TensorType : RankedTensorOf<[AnyInteger, F32]>;
 def CompositeType : AnyTypeOf<[MemType, TensorType]>;
+
+def Sysy_ConstantOp : Op<Sysy_Dialect, "constant"> {
+  let summary = "constant";
+  let description = [{
+      A constant literal in Sysy Dialect.
+  }];
+
+  let arguments = (ins AttrType:$value);
+  let results = (outs TensorType);
+}
 
 def Sysy_MatmulOp : Op<Sysy_Dialect, "matmul"> {
   let summary = "sysy 2D tensor multiplication";
