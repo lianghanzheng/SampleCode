@@ -1,5 +1,4 @@
 func.func @test_f32() {
-//  %0 = sysy.constant [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]> : tensor<2x3xf32>
   %1 = "sysy.constant"() {value = dense<[[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]> : tensor<2x3xf32>} : () -> tensor<2x3xf32>
   func.return
 }

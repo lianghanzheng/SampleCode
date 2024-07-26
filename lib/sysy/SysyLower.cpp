@@ -115,7 +115,23 @@ LogicalResult matchAndRewrite(
   return success();
 }
 
-}; // ConstantLowering
+}; // struct ConstantLowering
+
+struct MatmulLowering 
+    : public OpConversionPattern<sysy::MatmulOp> {
+  using OpConversionPattern<sysy::MatmulOp>::OpConversionPattern;
+
+  LogicalResult matchAndRewrite(
+        sysy::MatmulOp op, OpAdaptor adaptor,
+        ConversionPatternRewriter &rewriter) const final {
+    rewriter.updateRootInPlace(op, [&] {
+      op->setOperands(adaptor.getOperands());
+    });
+
+    return success();
+  }
+}; // struct MatmulLowering
+
 
 struct SysyTensorToMemRefLowering
     : public PassWrapper<SysyTensorToMemRefLowering, OperationPass<ModuleOp>> {
@@ -140,16 +156,15 @@ void SysyTensorToMemRefLowering::runOnOperation() {
       affine::AffineDialect,
       memref::MemRefDialect>();
 
-  //target.addIllegalDialect<SysyDialect>();
-  //target.addIllegalOp<sysy::ConstantOp>();
-  //target.addDynamicallyLegalOp<MatmulOp>([](MatmulOp op) {
-  //  return llvm::none_of(op->getOperandTypes(), [](Type type) {
-  //    return llvm::isa<TensorType>(type);
-  //  });
-  //});
+  target.addIllegalDialect<SysyDialect>();
+  target.addDynamicallyLegalOp<MatmulOp>([](MatmulOp op) {
+    return llvm::none_of(op->getOperandTypes(), [](Type type) {
+      return llvm::isa<TensorType>(type);
+    });
+  });
 
   RewritePatternSet patterns(&getContext());
-  patterns.add<ConstantLowering>(&getContext());
+  patterns.add<ConstantLowering, MatmulLowering>(&getContext());
 
   if (failed(applyPartialConversion(getOperation(), target, std::move(patterns))))
     return signalPassFailure();
