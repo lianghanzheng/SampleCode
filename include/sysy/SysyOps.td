@@ -1,9 +1,25 @@
 #ifndef SYSY_SYSYOPS_TD_
 #define SYSY_SYSYOPS_TD_
 
+include "mlir/IR/OpBase.td"
+include "mlir/Interfaces/SideEffectInterfaces.td"
+include "mlir/IR/BuiltinAttributes.td"
 include "SysyDialect.td"
 
+def AttrType : AnyAttrOf<[FloatElementsAttr<32>, AnyIntElementsAttr]>;
 def MemType : MemRefOf<[AnyInteger, F32]>;
+def TensorType : RankedTensorOf<[AnyInteger, F32]>;
+def CompositeType : AnyTypeOf<[MemType, TensorType]>;
+
+def Sysy_ConstantOp : Op<Sysy_Dialect, "constant"> {
+  let summary = "constant";
+  let description = [{
+      A constant literal in Sysy Dialect.
+  }];
+
+  let arguments = (ins FloatElementsAttr<32>:$value);
+  let results = (outs TensorType);
+}
 
 def Sysy_MatmulOp : Op<Sysy_Dialect, "matmul"> {
   let summary = "sysy 2D tensor multiplication";
@@ -11,7 +27,7 @@ def Sysy_MatmulOp : Op<Sysy_Dialect, "matmul"> {
       Matmul operation will be converted into affine loops then be optimized.
   }];
   
-  let arguments = (ins MemType:$dst, MemType:$lhs, MemType:$rhs);
+  let arguments = (ins CompositeType:$dst, CompositeType:$lhs, CompositeType:$rhs);
   let results = (outs );
   let assemblyFormat = "$dst `,` $lhs `,` $rhs attr-dict `:` type($dst) `,` type($lhs) `,` type($rhs)";
 }
