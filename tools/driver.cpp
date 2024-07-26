@@ -46,6 +46,10 @@ void sysyToParallelLLVMPipelineBuilder(mlir::OpPassManager &pm) {
   pm.addPass(mlir::sysy::createSysyLower());
 }
 
+void sysyTensorLoweringBuilder(mlir::OpPassManager &pm) {
+  pm.addPass(mlir::sysy::createTensorLoweringPass());
+}
+
 int main(int argc, char **argv) {
   mlir::DialectRegistry registry;
   mlir::registerAllDialects(registry);
@@ -64,6 +68,11 @@ int main(int argc, char **argv) {
       "sysy-to-llvm-parallel", 
       "Pass collection loweres Sysy dialect to parallel LLVM through openmp",
       sysyToParallelLLVMPipelineBuilder);
+  mlir::PassPipelineRegistration<>(
+      "sysy-tensor-to-memref",
+      "Partial lowering form tensor to memref",
+      sysyTensorLoweringBuilder);
+
 
   return mlir::asMainReturnCode(
       mlir::MlirOptMain(argc, argv, "Sysy Dialect Driver", registry)

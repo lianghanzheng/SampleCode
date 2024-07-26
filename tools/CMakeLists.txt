@@ -18,6 +18,7 @@ set(LIBS
   MLIRControlFlowToLLVM
   MLIRMemRefToLLVM
   MLIROpenMPToLLVM
+  MLIRSideEffectInterfaces
 )
 
 add_llvm_executable(sysy-opt

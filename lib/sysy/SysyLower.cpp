@@ -7,8 +7,17 @@
 #include "mlir/IR/Types.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/raw_ostream.h" // for llvm::errs.
-#include <mlir/IR/BuiltinTypes.h>
-#include <mlir/Support/LogicalResult.h>
+#include "llvm/ADT/ArrayRef.h"
+#include <cstdint>
+#include <memory>
+#include <mlir/Dialect/MemRef/IR/MemRef.h>
+#include <mlir/IR/PatternMatch.h>
+#include <mlir/IR/ValueRange.h>
+#include "mlir/IR/BuiltinTypes.h"
+#include "mlir/IR/DialectRegistry.h"
+#include "mlir/Pass/Pass.h"
+#include "mlir/Support/LogicalResult.h"
+#include "mlir/Support/TypeID.h"
 
 #include "sysy/SysyLower.h"
 #include "sysy/SysyDialect.h"
@@ -20,6 +29,7 @@ namespace sysy {
 using llvm::cast;
 using llvm::dyn_cast;
 using llvm::SmallVector;
+using llvm::ArrayRef;
 
 #define GEN_PASS_DEF_SYSYLOWER
 #include "sysy/SysyLower.h.inc"
@@ -30,6 +40,128 @@ public:
     addConversion([](Type type) { return type; });
   }
 }; // class SysyLowerTypeConverter
+
+
+//===----------------------------------------------------------------------===//
+// Op convertors for SysyTensorToMemRef
+//===----------------------------------------------------------------------===//
+
+static MemRefType convertTensorToMemRef(RankedTensorType type) {
+  return MemRefType::get(type.getShape(), type.getElementType());
+}
+
+static Value insertAllocAndDealloc(MemRefType type, Location loc,
+                                   PatternRewriter &rewriter) {
+  auto alloc = rewriter.create<memref::AllocOp>(loc, type);
+
+  auto *parentBlock = alloc->getBlock();
+  alloc->moveBefore(&parentBlock->front());
+
+  auto dealloc = rewriter.create<memref::DeallocOp>(loc, alloc);
+  dealloc->moveBefore(&parentBlock->back());
+  return alloc;
+}
+
+struct ConstantLowering : public OpRewritePattern<sysy::ConstantOp> {
+
+using OpRewritePattern<sysy::ConstantOp>::OpRewritePattern;
+
+LogicalResult matchAndRewrite(
+    sysy::ConstantOp op,
+    PatternRewriter &rewriter) const override {
+  const auto &constantValue = op.getValue();
+  Location loc = op.getLoc();
+  auto tensorType = llvm::cast<RankedTensorType>(op.getType());
+  //llvm::errs() << tensorType << "\n";
+  auto memRefType = convertTensorToMemRef(tensorType);
+  Value alloc = insertAllocAndDealloc(memRefType, loc, rewriter);
+  //llvm::errs() << alloc << "\n";
+  
+  auto valueShape = memRefType.getShape();
+  SmallVector<Value, 8> constantIndices;
+
+  if (!valueShape.empty()) {
+    for (auto i : llvm::seq<int64_t>(
+             0, *std::max_element(valueShape.begin(), valueShape.end())))
+      constantIndices.push_back(
+          rewriter.create<arith::ConstantIndexOp>(loc, i));
+  } else {
+    // This is the case of a tensor of rank 0.
+    constantIndices.push_back(
+        rewriter.create<arith::ConstantIndexOp>(loc, 0));
+  }
+
+  SmallVector<Value, 2> indices;
+  auto valueIt = constantValue.value_begin<FloatAttr>();
+  std::function<void(uint64_t)> storeElements = [&](uint64_t dimension) {
+    if (dimension == valueShape.size()) {
+      rewriter.create<affine::AffineStoreOp>(
+          loc, rewriter.create<arith::ConstantOp>(loc, *valueIt++), alloc,
+          llvm::ArrayRef(indices));
+      return;
+    }
+
+    for (uint64_t i = 0, e = valueShape[dimension]; i != e; ++i) {
+      indices.push_back(constantIndices[i]);
+      storeElements(dimension + 1);
+      indices.pop_back();
+    }
+  };
+
+  storeElements(/*dimension=*/0);
+
+  rewriter.replaceOp(op, alloc);
+
+  return success();
+}
+
+}; // ConstantLowering
+
+struct SysyTensorToMemRefLowering
+    : public PassWrapper<SysyTensorToMemRefLowering, OperationPass<ModuleOp>> {
+  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(SysyTensorToMemRefLowering);
+
+  void getDependentDialects(DialectRegistry &registry) const override {
+    registry.insert<SysyDialect,
+                    memref::MemRefDialect,
+                    arith::ArithDialect,
+                    affine::AffineDialect>();
+  }
+
+  void runOnOperation() final;
+
+}; // struct SysyTensorToMemRefLowering
+
+void SysyTensorToMemRefLowering::runOnOperation() {
+  ConversionTarget target(getContext());
+  target.addLegalDialect<
+      BuiltinDialect, 
+      arith::ArithDialect, 
+      affine::AffineDialect,
+      memref::MemRefDialect>();
+
+  //target.addIllegalDialect<SysyDialect>();
+  //target.addIllegalOp<sysy::ConstantOp>();
+  //target.addDynamicallyLegalOp<MatmulOp>([](MatmulOp op) {
+  //  return llvm::none_of(op->getOperandTypes(), [](Type type) {
+  //    return llvm::isa<TensorType>(type);
+  //  });
+  //});
+
+  RewritePatternSet patterns(&getContext());
+  patterns.add<ConstantLowering>(&getContext());
+
+  if (failed(applyPartialConversion(getOperation(), target, std::move(patterns))))
+    return signalPassFailure();
+}
+
+std::unique_ptr<Pass> createTensorLoweringPass() {
+  return std::make_unique<SysyTensorToMemRefLowering>();
+}
+
+//===----------------------------------------------------------------------===//
+// Op convertors for SysyLowering
+//===----------------------------------------------------------------------===//
 
 struct ConvertMatmul : public OpConversionPattern<MatmulOp> {
   ConvertMatmul(MLIRContext *ctx)
