@@ -4,6 +4,8 @@
 include "SysyDialect.td"
 
 def MemType : MemRefOf<[AnyInteger, F32]>;
+def TensorType : RankedTensorOf<[AnyInteger, F32]>;
+def CompositeType : AnyTypeOf<[MemType, TensorType]>;
 
 def Sysy_MatmulOp : Op<Sysy_Dialect, "matmul"> {
   let summary = "sysy 2D tensor multiplication";
@@ -11,7 +13,7 @@ def Sysy_MatmulOp : Op<Sysy_Dialect, "matmul"> {
       Matmul operation will be converted into affine loops then be optimized.
   }];
   
-  let arguments = (ins MemType:$dst, MemType:$lhs, MemType:$rhs);
+  let arguments = (ins CompositeType:$dst, CompositeType:$lhs, CompositeType:$rhs);
   let results = (outs );
   let assemblyFormat = "$dst `,` $lhs `,` $rhs attr-dict `:` type($dst) `,` type($lhs) `,` type($rhs)";
 }
