@@ -17,7 +17,7 @@ def Sysy_ConstantOp : Op<Sysy_Dialect, "constant"> {
       A constant literal in Sysy Dialect.
   }];
 
-  let arguments = (ins AttrType:$value);
+  let arguments = (ins FloatElementsAttr<32>:$value);
   let results = (outs TensorType);
 }
 
